@@ -181,8 +181,12 @@ module FileSystem {
     && fs'.data_map == fs.data_map
   }
 
-  function PathMapRenameDir(fs: FileSys, src: Path, dst: Path): PathMap
+  function PathMapRenameDir(fs: FileSys, src: Path, dst: Path): (path_map: PathMap)
   requires WF(fs)
+  ensures PathComplete(path_map)
+  ensures 
+    forall p | p != src && !InDir(src, p) && p != dst && !InDir(dst, p)
+      :: path_map[p] == fs.path_map[p]
   {
     imap path :: 
       // remove source paths
@@ -203,6 +207,10 @@ module FileSystem {
     var dst_id := fs.path_map[dst];
     var src_m := fs.meta_map[src_id];
     var src_m' := MetaDataUpdateCTime(src_m, ctime);
+    // NOTE(Jialin): temporary path restriction
+    && |src| > 1
+    && |dst| > 1
+    // end of temporary path restrictions
     && src_m.ftype.Directory?
     && (ValidPath(fs, dst) ==>
       && fs.meta_map[fs.path_map[dst]].ftype.Directory?
@@ -547,7 +555,6 @@ module FileSystem {
       if fs'.path_map[p] != src_id && fs'.path_map[p] != dst_id {
         var changedIds := if ValidPath(fs, dst) then iset{src_id, dst_id} else iset{src_id};
         var changedPaths := iset path | fs.path_map[path] in changedIds || fs'.path_map[path] in changedIds;
-
         SameAliases(fs, fs', changedPaths, changedIds);
         assert DirHasNoAlias(fs, p);
       }
@@ -561,73 +568,109 @@ module FileSystem {
     assert Inv(fs');
   }
 
+  lemma lime(fs: FileSys, p: Path) returns (path: Path)
+  requires WF(fs)
+  requires ValidPath(fs, p)
+  requires p in AliasPaths(fs, fs.path_map[p])
+  requires !NoAlias(fs, fs.path_map[p], p)
+  ensures path in AliasPaths(fs, fs.path_map[p]) && path != p
+  {
+    var aliases := AliasPaths(fs, fs.path_map[p]);
+    path :| path in aliases && path != p;
+  }
+
+  lemma lemon(src: Path, dst: Path, p1: Path, p2: Path)
+  requires |src| > 1
+  requires |dst| > 1
+  requires p1 != p2
+  requires p1 == dst || InDir(dst, p1)
+  requires p2 == dst || InDir(dst, p2)
+  ensures src + p1[|dst|..] != src + p2[|dst|..]
+  {
+    if InDir(dst, p1) && InDir(dst, p2) {
+      assert p1[|dst|..] != p2[|dst|..];
+
+      var p1' := src + p1[|dst|..];
+      var p2' := src + p2[|dst|..];
+
+      assert p1'[..|src|] == p2'[..|src|];
+    }
+  }
+
   lemma RenameDirPreservesInv(fs: FileSys, fs': FileSys, src: Path, dst: Path, ctime: Time)
   requires Inv(fs)
   requires Rename(fs, fs', src, dst, ctime)
   requires RenameDir(fs, fs', src, dst, ctime)
   ensures Inv(fs')
   {
-    // var paths := (iset path | path == src || InDir(src, path) || path == dst || InDir(dst, path) :: path);
-    // var changedIds := (iset path | path in paths && fs.path_map[path] != DefaultId :: fs.path_map[path]);
-        // + (iset path | path in paths && fs'.path_map[path] != DefaultId :: fs'.path_map[path]);
-    // var changedPaths := (iset path | fs.path_map[path] in changedIds || fs'.path_map[path] in changedIds);
-    // var changedPaths := (iset path | fs.path_map[path] in changedIds || fs'.path_map[path] in changedIds);
+    forall p | ValidPath(fs', p)
+    ensures DirHasNoAlias(fs', p)
+    ensures p != RootDir ==> ParentDirIsDir(fs', p)
+    {
+      var id := fs'.path_map[p];
+      var m := fs'.meta_map[id];
+      var aliases := AliasPaths(fs', id);
 
-    // requires forall p | p in changedPaths :: fs.path_map[p] in changedIds || fs.path_map[p] == DefaultId  
-    // SameAliases(fs, fs', changedPaths, changedIds);
-    // forall p | ValidPath(fs', p)
-    // ensures DirHasNoAlias(fs', p)
-    // ensures p != RootDir ==> ParentDirIsDir(fs', p)
-    // {
-    //   var paths := (iset path | path == src || InDir(src, path) || path == dst || InDir(dst, path) :: path);
-    //   var changedIds := (iset path | path in paths && fs.path_map[path] != DefaultId :: fs.path_map[path]);
-    //     // + (iset path | path in paths && fs'.path_map[path] != DefaultId :: fs'.path_map[path]);
-    //   var changedPaths := (iset path | fs.path_map[path] in changedIds || fs'.path_map[path] in changedIds);
-    //   SameAliases(fs, fs', changedPaths, changedIds);
+      if (exists path | path in aliases :: path == dst || InDir(dst, path)) {
+        // this covers cases for dst prefixes and old src's aliases
+        if m.ftype.Directory? && !NoAlias(fs', id, p) {
+          var path :| path in aliases && (path == dst || InDir(dst, path));
+          var aliaspath := lime(fs', path);
+          assert path != aliaspath;
 
-    //   if p in changedPaths {
-    //     if p == dst || InDir(dst, p) {
+          var srcpath := src + path[|dst|..];
+          assert id == fs.path_map[srcpath];
 
-    //     } else {
-    //       assert ValidPath(fs, p);
-    //       assert DirHasNoAlias(fs, p);
+          assert DirHasNoAlias(fs, srcpath); // observe
+          assert NoAlias(fs, id, srcpath);
 
-    //       // these are aliased therefore not a directory
-    //       var id := fs.path_map[p];
-    //       var m := fs.meta_map[id];
+          if aliaspath == dst || InDir(dst, aliaspath) {
+            var srcalias := src + aliaspath[|dst|..];
+            assert fs.path_map[srcalias] == fs'.path_map[aliaspath];
 
-    //       if m.ftype.Directory? {
-    //         assert NoAlias(fs, id, p);
-    //         assert id in changedIds;
-    //         assert id != DefaultId;
+            lemon(src, dst, path, aliaspath);
+            assert srcalias != srcpath;
 
-    //         // assert p in paths;
+            assert false;
+          } else {
+            assert fs.path_map[aliaspath] == fs'.path_map[aliaspath]; 
+            assert false;
+          }
+        }
+      } else {
+        assert DirHasNoAlias(fs, p); // observe
+        assert DirHasNoAlias(fs', p);
+      }
 
-    //         // assert p in paths;
+      if p != RootDir {
+        if p == dst || InDir(dst, p) {
+                assume ParentDirIsDir(fs', p);
 
-    //       }
-    //     }
+        } else {
+          assert ValidPath(fs, p);
+          assert ParentDirIsDir(fs, p); // observe
 
-    //     // rename should get rid of 
-    //     // assert p != src;
-    //     // assert !InDir(src, p);
+          // is it because parentdir changed?
 
-    //     // assert p == dst || InDir(dst, path) ||
+          assert id == fs.path_map[p];
+          // assert fs'.meta_map[]
+
+          assert GetParentDir(p) != dst;
+          assert GetParentDir(p) != src;
+
+          // assert !InDir(dst, GetParentDir(p));
 
 
-    //     // assert DirHasNoAlias(fs', p);
+          // assert ParentDirIsDir(fs', p);
 
-    //     assume DirHasNoAlias(fs', p);
-    //   } else {
-    //     assert ValidPath(fs, p);
-    //     assert DirHasNoAlias(fs, p);
-    //     assert DirHasNoAlias(fs', p);
-    //   }
-
-    //   assume p != RootDir ==> ParentDirIsDir(fs', p);
-    // }
-    assume false;
-    // assert Inv(fs');
+    //        && ValidPath(fs, parent_dir)
+    // && fs.meta_map[parent_id].ftype.Directory?
+        }
+      }
+      assume p != RootDir ==> ParentDirIsDir(fs', p);
+    }
+  
+    assert Inv(fs');
   }
 
   lemma RenamePreservesInv(fs: FileSys, fs': FileSys, source: Path, dest: Path, ctime: Time)
