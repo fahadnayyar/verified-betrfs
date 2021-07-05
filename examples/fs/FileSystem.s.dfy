@@ -33,6 +33,7 @@ module FileSystem {
     && fs.meta_map == (imap id :: if id == RootId then InitRootMetaData() else EmptyMetaData)
     && fs.data_map == (imap id :: EmptyData())
   }
+
   /// Inv conditions
 
   function AliasPaths(fs: FileSys, id: int) : (aliases: iset<Path>)
@@ -607,6 +608,7 @@ module FileSystem {
     ensures DirHasNoAlias(fs', p)
     ensures p != RootDir ==> ParentDirIsDir(fs', p)
     {
+      assert |p| > 0;
       var id := fs'.path_map[p];
       var m := fs'.meta_map[id];
       var aliases := AliasPaths(fs', id);
@@ -644,30 +646,47 @@ module FileSystem {
 
       if p != RootDir {
         if p == dst || InDir(dst, p) {
-                assume ParentDirIsDir(fs', p);
+          if p == dst {
+            assert ParentDirIsDir(fs', p);
+          } else {
+            var srcpath := src + p[|dst|..];
+            assert ParentDirIsDir(fs, srcpath);
 
+            var parent_dir := GetParentDir(p);
+            var srcparent_dir := GetParentDir(srcpath);
+            
+            assert ValidPath(fs, srcparent_dir);
+
+            assert parent_dir == dst || InDir(dst, parent_dir); // observe
+            assert srcpath[|src|..] == p[|dst|..];
+            assert src + parent_dir[|dst|..] == srcparent_dir; // observe
+
+            assert ParentDirIsDir(fs', p);
+          }
         } else {
+          var parent_dir := GetParentDir(p);
+          var parent_id := fs.path_map[parent_dir];
+
           assert ValidPath(fs, p);
           assert ParentDirIsDir(fs, p); // observe
+          assert ValidPath(fs, parent_dir);
 
-          // is it because parentdir changed?
+          assert parent_dir != src;
+          assert !InDir(src, parent_dir);
 
-          assert id == fs.path_map[p];
-          // assert fs'.meta_map[]
+          assert parent_dir != dst;
+          assert parent_dir != [];
 
-          assert GetParentDir(p) != dst;
-          assert GetParentDir(p) != src;
+          assert !InDir(dst, p);
+          assert !InDir(dst, parent_dir);
 
-          // assert !InDir(dst, GetParentDir(p));
+          assert fs.path_map[parent_dir] == fs'.path_map[parent_dir];
+          assert fs.meta_map[parent_id].ftype.Directory?;
 
-
-          // assert ParentDirIsDir(fs', p);
-
-    //        && ValidPath(fs, parent_dir)
-    // && fs.meta_map[parent_id].ftype.Directory?
+          assert ValidPath(fs', parent_dir);
+          assert ParentDirIsDir(fs', p);
         }
       }
-      assume p != RootDir ==> ParentDirIsDir(fs', p);
     }
   
     assert Inv(fs');

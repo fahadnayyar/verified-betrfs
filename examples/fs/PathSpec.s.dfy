@@ -46,9 +46,11 @@ module PathSpec {
 
   function GetParentDirIter(path: Path, i: int): (dir: Path)
   requires 0 <= i < |path|
+  requires forall j | i < j < |path| :: path[j] as int != '/' as int
   ensures |dir| < |path|
   ensures path[..|dir|] == dir
   ensures |dir| > 1 ==> path[|dir|] as int == '/' as int 
+  ensures forall j | |dir| < j < |path| :: path[j] as int != '/' as int
   {
     if path[i] as int == '/' as int then (
       if i == 0 && |path| > 1 then path[..i+1] else path[..i]
