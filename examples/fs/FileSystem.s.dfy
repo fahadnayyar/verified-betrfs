@@ -569,20 +569,7 @@ module FileSystem {
     assert Inv(fs');
   }
 
-  lemma lime(fs: FileSys, p: Path) returns (path: Path)
-  requires WF(fs)
-  requires ValidPath(fs, p)
-  requires p in AliasPaths(fs, fs.path_map[p])
-  requires !NoAlias(fs, fs.path_map[p], p)
-  ensures path in AliasPaths(fs, fs.path_map[p]) && path != p
-  {
-    var aliases := AliasPaths(fs, fs.path_map[p]);
-    path :| path in aliases && path != p;
-  }
-
-  lemma lemon(src: Path, dst: Path, p1: Path, p2: Path)
-  requires |src| > 1
-  requires |dst| > 1
+  lemma RenamedPathsRemainDifferent(src: Path, dst: Path, p1: Path, p2: Path)
   requires p1 != p2
   requires p1 == dst || InDir(dst, p1)
   requires p2 == dst || InDir(dst, p2)
@@ -609,6 +596,25 @@ module FileSystem {
     ensures p != RootDir ==> ParentDirIsDir(fs', p)
     {
       assert |p| > 0;
+      if p != RootDir {
+        var parent_dir := GetParentDir(p);
+        var parent_id := fs.path_map[parent_dir];
+
+        if p == dst {
+        } else if InDir(dst, p) {
+          var srcpath := src + p[|dst|..];
+          var srcparent_dir := GetParentDir(srcpath);
+          assert ParentDirIsDir(fs, srcpath);
+          assert parent_dir == dst || InDir(dst, parent_dir); // observe
+          assert src + parent_dir[|dst|..] == srcparent_dir; // observe
+        } else {
+          assert ValidPath(fs, p);
+          assert ParentDirIsDir(fs, p); // observe
+          assert fs.path_map[parent_dir] == fs'.path_map[parent_dir];
+        }
+        assert ParentDirIsDir(fs', p);
+      }
+
       var id := fs'.path_map[p];
       var m := fs'.meta_map[id];
       var aliases := AliasPaths(fs', id);
@@ -617,22 +623,18 @@ module FileSystem {
         // this covers cases for dst prefixes and old src's aliases
         if m.ftype.Directory? && !NoAlias(fs', id, p) {
           var path :| path in aliases && (path == dst || InDir(dst, path));
-          var aliaspath := lime(fs', path);
+          var aliaspath :| aliaspath in aliases && aliaspath != path;
           assert path != aliaspath;
 
           var srcpath := src + path[|dst|..];
           assert id == fs.path_map[srcpath];
-
           assert DirHasNoAlias(fs, srcpath); // observe
-          assert NoAlias(fs, id, srcpath);
 
           if aliaspath == dst || InDir(dst, aliaspath) {
             var srcalias := src + aliaspath[|dst|..];
             assert fs.path_map[srcalias] == fs'.path_map[aliaspath];
-
-            lemon(src, dst, path, aliaspath);
+            RenamedPathsRemainDifferent(src, dst, path, aliaspath);
             assert srcalias != srcpath;
-
             assert false;
           } else {
             assert fs.path_map[aliaspath] == fs'.path_map[aliaspath]; 
@@ -642,50 +644,6 @@ module FileSystem {
       } else {
         assert DirHasNoAlias(fs, p); // observe
         assert DirHasNoAlias(fs', p);
-      }
-
-      if p != RootDir {
-        if p == dst || InDir(dst, p) {
-          if p == dst {
-            assert ParentDirIsDir(fs', p);
-          } else {
-            var srcpath := src + p[|dst|..];
-            assert ParentDirIsDir(fs, srcpath);
-
-            var parent_dir := GetParentDir(p);
-            var srcparent_dir := GetParentDir(srcpath);
-            
-            assert ValidPath(fs, srcparent_dir);
-
-            assert parent_dir == dst || InDir(dst, parent_dir); // observe
-            assert srcpath[|src|..] == p[|dst|..];
-            assert src + parent_dir[|dst|..] == srcparent_dir; // observe
-
-            assert ParentDirIsDir(fs', p);
-          }
-        } else {
-          var parent_dir := GetParentDir(p);
-          var parent_id := fs.path_map[parent_dir];
-
-          assert ValidPath(fs, p);
-          assert ParentDirIsDir(fs, p); // observe
-          assert ValidPath(fs, parent_dir);
-
-          assert parent_dir != src;
-          assert !InDir(src, parent_dir);
-
-          assert parent_dir != dst;
-          assert parent_dir != [];
-
-          assert !InDir(dst, p);
-          assert !InDir(dst, parent_dir);
-
-          assert fs.path_map[parent_dir] == fs'.path_map[parent_dir];
-          assert fs.meta_map[parent_id].ftype.Directory?;
-
-          assert ValidPath(fs', parent_dir);
-          assert ParentDirIsDir(fs', p);
-        }
       }
     }
   
@@ -748,14 +706,6 @@ module FileSystem {
         }
       }
     }
-
-  //   assert WF(fs');
-  //   assert fs'.meta_map[DefaultId].EmptyMetaData?;
-  //   assert fs'.data_map[DefaultId] == EmptyData();
-
-  //   assert (forall p | ValidPath(fs', p) :: |p| > 0);
-  //   assert (forall p | ValidPath(fs', p) :: DirHasNoAlias(fs', p));
-  //   assert (forall p | ValidPath(fs', p) && p != RootDir :: ParentDirIsDir(fs', p));
 
     assert Inv(fs');
   }
